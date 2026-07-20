@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Serial Plate Generator - True Single Line</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 h-screen p-8 text-gray-800">
+
+    <div class="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-3 gap-8 h-full">
+        
+        <div class="bg-white p-6 rounded-lg shadow-md flex flex-col gap-6 overflow-y-auto">
+            <h1 class="text-2xl font-bold border-b pb-2">Plate Settings</h1>
+
+            <div>
+                <label class="block text-sm font-semibold mb-1">Shape</label>
+                <select id="shapeSelect" class="w-full border rounded p-2 bg-gray-50">
+                    <option value="rectangle">Rectangle</option>
+                    <option value="torus" selected>Torus (Circular)</option>
+                </select>
+            </div>
+
+            <div id="dimensionsPanel" class="grid grid-cols-2 gap-4"></div>
+
+            <div>
+                <label class="block text-sm font-semibold mb-1">Text Content</label>
+                <div id="textInputsPanel" class="flex flex-col gap-2"></div>
+            </div>
+
+            <div class="mt-auto pt-4 border-t flex flex-col gap-3">
+                <div class="flex items-center gap-2 mb-2">
+                    <input type="checkbox" id="showBordersToggle" class="w-4 h-4 cursor-pointer">
+                    <label for="showBordersToggle" class="text-sm font-semibold text-gray-700 cursor-pointer">Include Plate Outline</label>
+                </div>
+
+                <div class="grid grid-cols-2 gap-2">
+                    <button onclick="exportDXF()" class="bg-purple-600 hover:bg-purple-700 text-white py-2 rounded font-semibold transition shadow text-sm">Export DXF</button>
+                    <button onclick="exportSVG()" class="bg-blue-600 hover:bg-blue-700 text-white py-2 rounded font-semibold transition shadow text-sm">Export SVG</button>
+                </div>
+                <button onclick="exportPNG()" class="bg-green-600 hover:bg-green-700 text-white py-2 rounded font-semibold transition shadow text-sm">Export PNG (Raster)</button>
+                
+                <hr class="my-2 border-gray-300">
+                <div class="flex flex-col gap-2">
+                    <label class="block text-sm font-semibold mb-1">Bulk Generate (CSV)</label>
+                    <p class="text-xs text-gray-500 mb-1">Format: shape, dim1, dim2, line1, line2...</p>
+                    <form action="/bulk" method="POST" enctype="multipart/form-data" class="flex flex-col gap-2">
+                        <input type="file" name="csv_file" accept=".csv" class="text-sm border p-1 rounded bg-gray-50 cursor-pointer" required>
+                        <button type="submit" class="bg-gray-800 hover:bg-black text-white py-2 rounded font-semibold transition shadow">
+                            Upload & Download ZIP
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <div class="md:col-span-2 bg-white p-6 rounded-lg shadow-md flex flex-col">
+            <h2 class="text-lg font-bold border-b pb-2 mb-4 text-gray-400">Live Single-Line Preview</h2>
+            <div class="flex-grow flex items-center justify-center bg-[url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAoAAAAKCAYAAACNMs+9AAAAAXNSR0IArs4c6QAAACVJREFUKFNjZCASMDKgAnv37v3PTEqIUTZqBw0sDMRwkOQeIAAA9t4PAe8uJ2sAAAAASUVORK5CYII=')] overflow-hidden border rounded relative">
+                <svg id="platePreview" width="100%" height="100%" xmlns="http://www.w3.org/2000/svg"></svg>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const shapeSelect = document.getElementById('shapeSelect');
+        const dimensionsPanel = document.getElementById('dimensionsPanel');
+        const textInputsPanel = document.getElementById('textInputsPanel');
+        const svgPreview = document.getElementById('platePreview');
+        const showBordersToggle = document.getElementById('showBordersToggle');
+
+        let state = {
+            shape: 'torus',
+            width: 100, height: 50,
+            od: 35, id: 23, 
+            strokeWidth: 0.2, // Default fine stroke width
+            lines: ["SN-2026", "BATCH 4", "", "", ""],
+            showBorders: true
+        };
+
+        // Global array to store raw lines for DXF builder
+        let currentDXFLines = [];
+
+        // ---------------------------------------------------------
+        // MICRO STICK FONT ENGINE
+        // ---------------------------------------------------------
+        const stickFont = {
+            'A': '0F509F,2878', 'B': '0F0060936707,679A6F0F', 'C': '936020020C2E6E9B', 'D': '000F6F9B936000',
+            'E': '90000F9F,0767', 'F': '90000F,0767', 'G': '936020020C2E6E9B9757', 'H': '000F,909F,0797',
+            'I': '404F', 'J': '909C7E2E0C', 'K': '000F,9007,479F', 'L': '000F9F', 'M': '0F0055909F',
+            'N': '0F009F90', 'O': '2070929C7E2E0C0220', 'P': '0F0060936707', 'Q': '2070929C7E2E0C0220,6A9F',
+            'R': '0F0060936707,479F', 'S': '927020020628789A9C7E2E0C', 'T': '0090,404F', 'U': '000C2E7E9C90',
+            'V': '004F90', 'W': '000F499F90', 'X': '009F,900F', 'Y': '0046,90464F', 'Z': '00900F9F',
+            '0': '2070929C7E2E0C0220,0F90', '1': '22404F', '2': '02207092960F9F', '3': '02207092769A9C7E2E0C,2676',
+            '4': '70080A9A,707F', '5': '90000676989C7E2E0C', '6': '927020020C2E7E9C987606', '7': '00904F',
+            '8': '270502207092957727090C2E7E9C9977', '9': '0C2E7E9C92702002062898', 
+            '-': '2878', '/': '0F90', '.': '4E4F5F5E4E', '#': '2484,2A8A,303F,707F', ' ': ''
+        };
+
+        shapeSelect.value = state.shape;
+        showBordersToggle.checked = state.showBorders;
+
+        function buildForm() {
+            dimensionsPanel.innerHTML = ''; textInputsPanel.innerHTML = '';
+            
+            const strokeInputHTML = `<div><label class="text-xs font-bold text-gray-600">Line Thick (mm)</label><input type="number" value="${state.strokeWidth}" class="w-full border p-2 bg-gray-50 font-mono" step="0.05" oninput="updateState('strokeWidth', this.value)"></div>`;
+
+            if (state.shape === 'rectangle') {
+                dimensionsPanel.innerHTML = `
+                    <div><label class="text-xs font-bold">Width (mm)</label><input type="number" value="${state.width}" class="w-full border p-2 bg-gray-50" oninput="updateState('width', this.value)"></div>
+                    <div><label class="text-xs font-bold">Height (mm)</label><input type="number" value="${state.height}" class="w-full border p-2 bg-gray-50" oninput="updateState('height', this.value)"></div>
+                    ${strokeInputHTML}
+                `;
+                for(let i=0; i<5; i++) textInputsPanel.innerHTML += `<input type="text" placeholder="Line ${i+1}" value="${state.lines[i] || ''}" class="w-full border p-2 bg-gray-50 uppercase" oninput="updateLine(${i}, this.value)">`;
+            } else {
+                dimensionsPanel.innerHTML = `
+                    <div><label class="text-xs font-bold">Outer Dia (mm)</label><input type="number" value="${state.od}" class="w-full border p-2 bg-gray-50" step="0.1" oninput="updateState('od', this.value)"></div>
+                    <div><label class="text-xs font-bold">Inner Dia (mm)</label><input type="number" value="${state.id}" class="w-full border p-2 bg-gray-50" step="0.1" oninput="updateState('id', this.value)"></div>
+                    ${strokeInputHTML}
+                `;
+                textInputsPanel.innerHTML += `
+                    <input type="text" placeholder="Top Curve" value="${state.lines[0] || ''}" class="w-full border p-2 bg-gray-50 uppercase" oninput="updateLine(0, this.value)">
+                    <input type="text" placeholder="Bottom Curve" value="${state.lines[1] || ''}" class="w-full border p-2 bg-gray-50 uppercase" oninput="updateLine(1, this.value)">
+                `;
+            }
+            renderSVG();
+        }
+
+        function updateState(key, value) { state[key] = Number(value); renderSVG(); }
+        function updateLine(index, value) { state.lines[index] = value; renderSVG(); }
+        shapeSelect.addEventListener('change', (e) => { state.shape = e.target.value; buildForm(); });
+        showBordersToggle.addEventListener('change', (e) => { state.showBorders = e.target.checked; renderSVG(); });
+
+        // ---------------------------------------------------------
+        // PATH GENERATOR & POLAR MATH TRANSFORM
+        // ---------------------------------------------------------
+        function drawTextPaths(text, xCenter, yCenter, fontSize, maxLineWidth, arcType, textRadius) {
+            let pathString = '';
+            text = text.toUpperCase();
+            
+            const charWidth = 10; const charHeight = 15; const charSpacing = 4;
+            const totalLogicalWidth = text.length * charWidth + Math.max(0, text.length - 1) * charSpacing;
+            if (totalLogicalWidth === 0) return '';
+
+            const scale = Math.min(fontSize / charHeight, maxLineWidth / totalLogicalWidth);
+            
+            for (let i = 0; i < text.length; i++) {
+                const char = text[i];
+                const strokes = stickFont[char] || '';
+                
+                let charCenterX = (i * (charWidth + charSpacing)) + (charWidth / 2) - (totalLogicalWidth / 2);
+                
+                if (strokes.length > 0) {
+                    const lines = strokes.split(',');
+                    lines.forEach(line => {
+                        let prevX, prevY;
+                        for (let j = 0; j < line.length; j += 2) {
+                            const lx = parseInt(line[j], 16);
+                            const ly = parseInt(line[j+1], 16);
+                            
+                            const offsetX = (lx - charWidth/2) * scale;
+                            const offsetY = (ly - charHeight/2) * scale;
+                            
+                            let finalX, finalY;
+                            
+                            if (arcType === 'none') {
+                                finalX = xCenter + (charCenterX * scale) + offsetX;
+                                finalY = yCenter + offsetY;
+                            } else if (arcType === 'top') {
+                                const angle = -Math.PI/2 + ((charCenterX * scale + offsetX) / textRadius);
+                                const r = textRadius - offsetY; 
+                                finalX = xCenter + r * Math.cos(angle);
+                                finalY = yCenter + r * Math.sin(angle);
+                            } else if (arcType === 'bottom') {
+                                const angle = Math.PI/2 - ((charCenterX * scale + offsetX) / textRadius);
+                                const r = textRadius + offsetY; 
+                                finalX = xCenter + r * Math.cos(angle);
+                                finalY = yCenter + r * Math.sin(angle);
+                            }
+                            
+                            if (j === 0) {
+                                pathString += ` M ${finalX.toFixed(3)} ${finalY.toFixed(3)}`;
+                            } else {
+                                pathString += ` L ${finalX.toFixed(3)} ${finalY.toFixed(3)}`;
+                                currentDXFLines.push({x1: prevX, y1: prevY, x2: finalX, y2: finalY});
+                            }
+                            prevX = finalX; prevY = finalY;
+                        }
+                    });
+                }
+            }
+            return pathString;
+        }
+
+        // ---------------------------------------------------------
+        // MASTER RENDERER
+        // ---------------------------------------------------------
+        function renderSVG() {
+            let svgContent = '';
+            const padding = 2; 
+            currentDXFLines = []; // Reset lines for DXF
+
+            if (state.shape === 'rectangle') {
+                svgPreview.setAttribute('viewBox', `-${padding} -${padding} ${state.width + padding*2} ${state.height + padding*2}`);
+                
+                if (state.showBorders) {
+                    svgContent += `<rect x="0" y="0" width="${state.width}" height="${state.height}" fill="#f3f4f6" stroke="#1f2937" stroke-width="0.5" rx="2" />`;
+                }
+                
+                const maxLines = 5;
+                const maxLineHeight = (state.height * 0.9) / maxLines;
+                const maxLineWidth = state.width * 0.9; 
+                
+                state.lines.forEach((text, i) => {
+                    if(text && i < maxLines) {
+                        const finalFontSize = maxLineHeight * 0.8; 
+                        const yPos = (state.height * 0.05) + (maxLineHeight * i) + (maxLineHeight / 2);
+                        const paths = drawTextPaths(text, state.width/2, yPos, finalFontSize, maxLineWidth, 'none', 0);
+                        svgContent += `<path d="${paths}" fill="none" stroke="#000" stroke-width="${state.strokeWidth}" stroke-linecap="round" stroke-linejoin="round" />`;
+                    }
+                });
+
+            } else if (state.shape === 'torus') {
+                const cx = state.od / 2; const cy = state.od / 2;
+                const textRadius = (state.od / 2 + state.id / 2) / 2; 
+                const maxFontHeight = (state.od - state.id) / 2 * 0.7; 
+                const maxArcLength = (Math.PI * textRadius) * 0.9; 
+
+                svgPreview.setAttribute('viewBox', `-${padding} -${padding} ${state.od + padding*2} ${state.od + padding*2}`);
+                
+                if (state.showBorders) {
+                    svgContent += `<path d="M ${cx},${cy} m -${state.od/2},0 a ${state.od/2},${state.od/2} 0 1,0 ${state.od},0 a ${state.od/2},${state.od/2} 0 1,0 -${state.od},0 M ${cx},${cy} m -${state.id/2},0 a ${state.id/2},${state.id/2} 0 1,1 ${state.id},0 a ${state.id/2},${state.id/2} 0 1,1 -${state.id},0" fill="#f3f4f6" fill-rule="evenodd" stroke="#1f2937" stroke-width="0.5" />`;
+                }
+                
+                if (state.lines[0]) {
+                    const paths = drawTextPaths(state.lines[0], cx, cy, maxFontHeight, maxArcLength, 'top', textRadius);
+                    svgContent += `<path d="${paths}" fill="none" stroke="#000" stroke-width="${state.strokeWidth}" stroke-linecap="round" stroke-linejoin="round" />`;
+                }
+                if (state.lines[1]) {
+                    const paths = drawTextPaths(state.lines[1], cx, cy, maxFontHeight, maxArcLength, 'bottom', textRadius);
+                    svgContent += `<path d="${paths}" fill="none" stroke="#000" stroke-width="${state.strokeWidth}" stroke-linecap="round" stroke-linejoin="round" />`;
+                }
+            }
+            svgPreview.innerHTML = svgContent;
+        }
+
+        buildForm();
+
+        // ---------------------------------------------------------
+        // EXPORT FUNCTIONS
+        // ---------------------------------------------------------
+        function exportDXF() {
+            let dxf = "0\nSECTION\n2\nENTITIES\n";
+            
+            if (state.showBorders) {
+                if (state.shape === 'rectangle') {
+                    const w = state.width, h = state.height;
+                    const pts = [[0,0], [w,0], [w,h], [0,h], [0,0]];
+                    for(let i=0; i<4; i++) currentDXFLines.push({x1: pts[i][0], y1: pts[i][1], x2: pts[i+1][0], y2: pts[i+1][1]});
+                } else {
+                    const cx = state.od/2; const cy = state.od/2;
+                    dxf += `0\nCIRCLE\n8\n0\n10\n${cx}\n20\n${-cy}\n40\n${state.od/2}\n`;
+                    dxf += `0\nCIRCLE\n8\n0\n10\n${cx}\n20\n${-cy}\n40\n${state.id/2}\n`;
+                }
+            }
+            
+            currentDXFLines.forEach(l => {
+                const y1 = -l.y1; const y2 = -l.y2; 
+                dxf += `0\nLINE\n8\n0\n10\n${l.x1.toFixed(3)}\n20\n${y1.toFixed(3)}\n11\n${l.x2.toFixed(3)}\n21\n${y2.toFixed(3)}\n`;
+            });
+            
+            dxf += "0\nENDSEC\n0\nEOF\n";
+            
+            const blob = new Blob([dxf], { type: "application/dxf" });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.href = url; link.download = `serial_plate_${state.shape}.dxf`;
+            document.body.appendChild(link); link.click(); document.body.removeChild(link);
+        }
+
+        function exportSVG() {
+            const svgData = new XMLSerializer().serializeToString(svgPreview);
+            const blob = new Blob([svgData], { type: "image/svg+xml;charset=utf-8" });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.href = url; link.download = `serial_plate_${state.shape}.svg`;
+            document.body.appendChild(link); link.click(); document.body.removeChild(link);
+        }
+
+        function exportPNG() {
+            const svgData = new XMLSerializer().serializeToString(svgPreview);
+            const blob = new Blob([svgData], { type: "image/svg+xml;charset=utf-8" });
+            const url = URL.createObjectURL(blob);
+            const img = new Image();
+            
+            img.onload = function() {
+                const canvas = document.createElement("canvas"); const ctx = canvas.getContext("2d");
+                const bbox = svgPreview.viewBox.baseVal; const scale = 10; 
+                canvas.width = bbox.width * scale; canvas.height = bbox.height * scale;
+                ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 0, canvas.width, canvas.height);
+                ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                
+                const link = document.createElement("a");
+                link.href = canvas.toDataURL("image/png"); link.download = `serial_plate_${state.shape}.png`;
+                document.body.appendChild(link); link.click(); document.body.removeChild(link);
+            };
+            img.src = url;
+        }
+    </script>
+</body>
+</html>

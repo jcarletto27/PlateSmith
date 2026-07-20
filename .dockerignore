@@ -1,0 +1,48 @@
+# Version-control metadata
+.git
+.gitignore
+
+# Local Python environments and caches
+.venv
+venv
+env
+ENV
+__pycache__
+*.py[cod]
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.pytype
+
+# Build, test, and coverage output
+build
+dist
+*.egg-info
+.eggs
+wheels
+.coverage
+.coverage.*
+htmlcov
+coverage.xml
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+instance
+*.pem
+*.key
+
+# Editor, OS, log, and temporary files
+.idea
+.vscode
+.DS_Store
+Thumbs.db
+*.log
+*.tmp
+*.swp
+*.swo
+*~
+
+# Compose configuration is not needed inside the application image
+compose.yml

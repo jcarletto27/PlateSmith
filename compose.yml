@@ -1,0 +1,12 @@
+services:
+  web:
+    build: .
+    ports:
+      - "5544:5544"
+    volumes:
+      # This mounts your local folder into the container
+      # so you can edit HTML/JS without rebuilding the image!
+      - .:/app
+    environment:
+      - FLASK_ENV=development
+      - FLASK_DEBUG=1
